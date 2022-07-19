@@ -1,0 +1,150 @@
+---
+title: "Argyresthia_Host Plant_Stochastic_Character_Mapping"
+author: "Jacob Gorneau"
+date: "01/06/2022"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r load packages, eval=FALSE}
+library(phytools)
+library(corHMM)
+library(geiger)
+```
+
+## 1. Read in files (<5 seconds)
+
+Read in life history data file containing Host Plant data (*Argyresthia_Hosts.csv*; this file contains the same matrix as Table S4), as well as iqtree phylogeny. Root tree based on outgroup node. Use function **drop.tip** to retain ingroup with host plant data and outgroup taxa, root, make ultrametric using function **chronos**.
+
+```{r reading in files, eval=FALSE}
+
+#read in Host Plant data file
+HPdata=read.csv("Argyresthia_Hosts.csv",header=TRUE,row.names=1)
+rownames(HPdata)
+head(HPdata)
+
+#read in IQTREE phylogeny and use keep.tip to retain ingroup with host plant data 
+#and the outgroup taxa
+iqtree=read.tree(file="Argyresthia_output_R1_taxa_removed.phy.contree.tre")
+mrbayes=read.nexus(file="Argyresthia_Bayes_R2.tre")
+#plot and identify node number for outgroup
+plotTree(iqtree,node.numbers=TRUE,fsize=0.5)
+#root based on node number of outgroup
+iqtree=root(iqtree,node=222)
+#plot to make sure tree is rooted properly
+plotTree(iqtree,fsize=0.3)
+#identify taxa not in tree and prune tree
+HPchk=name.check(iqtree,HPdata)
+HPtree=drop.tip(iqtree,HPchk$tree_not_data)
+plotTree(HPtree,fsize=0.5)
+#make tree ultrametric
+HPtree=chronos(HPtree)
+plotTree(HPtree,fsize=0.5)
+
+```
+
+## 2. Model selection for stochastic character mapping (~2 minutes)
+
+Select models for use in stochastic character mapping based on Akaike information criterion (AIC) values.
+
+```{r model selection, eval=FALSE}
+
+HP=setNames(HPdata[,1],rownames(HPdata))
+HP=as.factor(HP)
+
+#social classification
+fit.HP.ER=fitMk(HPtree,HP,model="ER")
+fit.HP.SYM=fitMk(HPtree,HP,model="SYM")
+fit.HP.ARD=fitMk(HPtree,HP,model="ARD")
+
+#extract AIC values for each model
+aic.HP<-c(AIC(fit.HP.ER),AIC(fit.HP.ARD),AIC(fit.HP.SYM))
+#print summary table
+HP.mod.sel=data.frame(model.HP=c("ER","SYM","ARD"), 
+  logL.HP=c(logLik(fit.HP.ER),logLik(fit.HP.SYM), 
+  logLik(fit.HP.ARD)), AIC.HP=aic.HP,delta.AIC.HP=aic.HP-min(aic.HP))
+HP.mod.sel
+#use ER
+
+#write model selection information to csv document
+write.csv(HP.mod.sel,"model_selection.csv")
+
+```
+
+
+## 3. Stochastic character mapping (>2 hours)
+
+Conduct stochastic character mapping for host plant, applying the model selected in section 2.
+
+```{r stochastic character mapping, eval=FALSE}
+
+##social classification (levels = 8)
+#set colors in accordance with levels
+cols.HP=setNames(c("darkslategray", "cadetblue1", "lightcyan3","gray90","darkseagreen2",
+                   "darkseagreen4","navajowhite4","navajowhite1"),levels(HP))
+#conduct stochastic character mapping using mcmc and model selected from section 3
+mtrees.HP<-make.simmap(HPtree,HP,model="ER",
+        nsim=1000,Q="mcmc",vQ=0.01, prior=list(use.empirical=TRUE),samplefreq=10)
+#plot relative frequency vs. number of changes for each character state 
+#change from stochastic character mapping inference
+dd.HP=density(mtrees.HP,bw=2)
+plot(dd.HP)
+#set a 10 x 10 grid to plot 100 stochastic map trees
+par(mfrow=c(10,10))
+#plot 100 stochastic map trees, sampled from set of 1000
+null.HP<-sapply(mtrees.HP[seq(10,1000,by=10)],
+             plot,colors=cols.HP,lwd=1,ftype="off")
+#compute posterior probabilities at nodes
+pd.HP<-summary(mtrees.HP)
+pd.HP
+pd.HP$ace
+write.csv(pd.HP$ace,file="posterior_probabilities_by_node.csv")
+#create a plot showing PP at all nodes of the tree and node labels
+par(mfrow=c(1,1))
+plot(pd.HP,colors=cols.HP,fsize=0.4,ftype="i",lwd=2, 
+     offset=0.4,ylim=c(-1,Ntip(HPtree)), cex=c(0.5,0.3))
+nodelabels(bg="transparent",col="black",frame="none",
+	adj=c(1.5,1.5),cex=0.7)
+#add a legend
+legend("bottomleft",legend=levels(HP),title="Host Plant",pch=22, 
+       pt.cex=1.5,pt.bg=cols.HP,bty="n",cex=0.8)
+#create a plot showing PP at all nodes of the tree without node labels
+pdf("Argyresthia_stochastic_host_plant.pdf") # starts writing a PDF to file
+par(mfrow=c(1,1))
+plot(pd.HP,colors=cols.HP,fsize=0.4,ftype="i",lwd=2, 
+     offset=0.4,ylim=c(-1,Ntip(HPtree)), cex=c(0.5,0.3))
+#add a legend
+legend("bottomleft",legend=levels(HP),title="Host Plant",
+       pch=22, pt.cex=1.5,pt.bg=cols.HP,bty="n",cex=0.8)
+dev.off() # closes the PDF file
+pdf("Argyresthia_stochastic_host_plant_node_numbers.pdf") # starts writing a PDF to file
+par(mfrow=c(1,1))
+plot(pd.HP,colors=cols.HP,fsize=0.4,ftype="i",lwd=2, 
+     offset=0.4,ylim=c(-1,Ntip(HPtree)), cex=c(0.5,0.3))
+nodelabels(bg="transparent",col="black",frame="none",
+	adj=c(1.5,1.5),cex=0.7)
+#add a legend
+legend("bottomleft",legend=levels(HP),title="Host Plant",
+       pch=22, pt.cex=1.5,pt.bg=cols.HP,bty="n",cex=0.8)
+dev.off() # closes the PDF file
+
+
+```
+## 4. Comparing results of phylogenetic inferences between IQTREE and MrBayes (<5 seconds)
+
+```{r comparing IQTREE and MrBayes, eval=FALSE}
+
+pdf("Cophylo_IQTREE_MrBayes.pdf") # starts writing a PDF to file
+#plot and identify node number for outgroup with MrBayes inference
+plotTree(mrbayes,node.numbers=TRUE,fsize=0.5)
+#root based on node number of outgroup with MrBayes inference
+mrbayes=root(mrbayes,node=217)
+plotTree(mrbayes,fsize=0.5)
+#IQTREE with MrBayes
+iqtree_mrbayes=cophylo(iqtree,mrbayes)
+pdf("IQTREE_MrBayes_Cophylo.pdf") # starts writing a PDF to file
+plot(iqtree_mrbayes,rotate=TRUE,print=TRUE,fsize=0.25)
+dev.off() # closes the PDF file
+
+```
